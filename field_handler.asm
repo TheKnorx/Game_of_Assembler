@@ -2,7 +2,7 @@ section .bss
 section .data
 section .text
 
-global configure_field, free_fields
+global configure_field
 ; Project internal functions and variables
 extern FIELDS_ARRAY, FIELD_WIDTH, FIELD_AREA
 ; glibc functions
@@ -53,8 +53,3 @@ configure_field:
         mov     rsp, rbp
         pop     rbp
         ret
-
-
-free_fields:
-    nop
-    ret
