@@ -17,9 +17,9 @@ section .text
 global main
 global FIELD_WIDTH, FIELD_HEIGHT, FIELD_AREA, FIELDS_ARRAY
 ; project functions that may not return
-extern try_ascii_to_int, try_alloc_fields, configure_field, free_fields
-; project functions
-; extern
+extern try_ascii_to_int, try_alloc_fields
+; project functions (that always return)
+extern configure_field, free_fields, decide_cell_state, decide_cell_state
 ; glibc functions:
 extern printf
 
@@ -27,8 +27,71 @@ extern printf
 ; function for simulating the generations
 ; ()[]
 simulate:
-    nop
-    ret
+    ; Prolog
+    push    rbp
+    mov     rbp, rsp
+    sub     rsp, -16
+    
+    push    rbx             ; make rbx available for storing loop index --> so it doesn't get garbled by function calls
+    push    r12             ; make r12 available for storing which field to read from
+    mov     r12, 0x1        ; set r12 to 1 --> we xor this on every loop so if we want to start at 0, we have to set it to 1 before
+    
+    push    r13             ; make r13 available for cell row index counter
+    push    r14             ; make r14 available for cell column index counter
+
+    mov     rbx, [GENERATIONS]  ; move generations into index variable
+    .for_generation:  ; iterate through all generations simulating them
+        dec     rbx             ; rbx--
+        xor     r12, 0x1        ; flip the current field to use
+
+        ; init source and destination register with correct pointer
+        ; this registers will be garbled, so we have to push them or later on migrate to callee-saved registers
+        mov     rsi, [FIELDS_ARRAY+0x8*r12]  ; move field to read from into source index
+        mov     rax, r12        ; move current field to read from into rax
+        xor     rax, 0x1        ; flip it to get the field to write to
+        mov     rdi, [FIELDS_ARRAY+0x8+rax]  ; move field to write to into destination index
+
+        xor     r13, r13        ; clear r13 and use it as row index
+        .for_row:  ; iterate through all rows of the game field
+            xor     r14, r14        ; clear r14 and use it as a column index
+            .for_column:  ; iterate through all columns of the current row
+                push    rdi             ; save rdi onto stack
+                push    rsi             ; save rsi onto stack
+
+                ; now we have to pass the field to read, the field to write to the decide_cell_state function
+                ; along with the row and column index of the cell --> luckily all first two things are correctly loaded
+                mov     rdx, r13        ; move row index into parameter register rdx 
+                mov     rcx, r14        ; move column index into parameter register rcx (--> thats why we cannot use rcx for counter stuff - gets garbled)
+                call    decide_cell_state  ; let this function decide what to do with the cell
+
+                pop     rsi             ; restore rsi from stack
+                pop     rdi             ; restore rdi from stack
+
+                inc     r14             ; r14++ (column counter ++)
+                cmp     r14, [FIELD_WIDTH]; if r14 < FIELD_WIDTH
+                jb      .for_column     ;   we continue the loop
+                ; else we fall through and continue to next row if possible
+
+            inc     r13             ; r13++ (row counter ++)
+            cmp     r13, [FIELD_HEIGHT]; if r13 < FIELD_HEIGHT
+            jb      .for_row        ;    we continue the loop 
+            ; else we fall through and enter the next generation
+
+        cmp     rbx, 0          ; if rbx >= 0 meaning still have to simulate some generations (>= cause of the initial dec at begin of loop)
+        jge     .for_generation ;   continue the loop
+        ; if we got here that means the loop is finished, we simulated all generations, and we begin teardown of program
+        ; fall through to return procedure
+
+    .return: 
+        ; Restore pushed registers
+        pop     r14         ; restore pushed r14
+        pop     r13         ; restore pushed r13
+        pop     r12         ; restore pushed r12
+        pop     rbx         ; restore pushed rbx
+        ; Epilog
+        mov     rsp, rbp
+        pop     rbp
+        ret
 
 ; main entry point of program
 ; we expect the width, the height of the game field as well as the amount of generations to simulate via command line arguments

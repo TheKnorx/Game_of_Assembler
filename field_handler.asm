@@ -2,7 +2,7 @@ section .bss
 section .data
 section .text
 
-global configure_field
+global configure_field, decide_cell_state
 ; Project internal functions and variables
 extern FIELDS_ARRAY, FIELD_WIDTH, FIELD_AREA
 ; glibc functions
@@ -53,3 +53,15 @@ configure_field:
         mov     rsp, rbp
         pop     rbp
         ret
+
+
+
+
+; Given a row and column coordinate of a cell, determin the state of this cell and its neighbours
+; and based on those findings decide whether the cell should live on or not
+; Then write the result to the game field --> this function abstracts the handling and building of coordinates,
+; as well the reading and writing of cell-information to the correct fields completely from the main executable section
+; (int* field_to_read, int* field_to_write, int row_index, int column_index)[-]
+decide_cell_state:
+    nop
+    ret
