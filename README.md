@@ -5,6 +5,10 @@ Game of life in assembly
 Note that both, the width and the height, ARE NOT to exceed 4 bytes in size and the multiplication of them also SHOULD NOT exceed 4 bytes in size<br>
 Bigger width and field sizes cause undefined behavior. Additionally note that if the multiplication (=field area) of them exceeds 4 bytes, we modify the value with: `2^32 mod <result>`. Just like the behavior of a C-style int variable on overflow.  
 
+## Building:
+To build the project use the provided Makefile with the command `make`.
+The program need 64 bit and runs only on intel architecture! Also it was only tested on Linux and will most likely not work on Windows (- I mean why should it, its Windows. What do you expect?)
+
 # Code Conventions:
 ## Function calls
 * Every function call uses the `x84-64 System V ABI calling convention` for parameter passing, as well as for returning return values
