@@ -30,7 +30,7 @@ simulate:
     ; Prolog
     push    rbp
     mov     rbp, rsp
-    sub     rsp, -16
+    and     rsp, -16
     
     push    rbx             ; make rbx available for storing loop index --> so it doesn't get garbled by function calls
     push    r12             ; make r12 available for storing which field to read from
@@ -46,10 +46,10 @@ simulate:
 
         ; init source and destination register with correct pointer
         ; this registers will be garbled, so we have to push them or later on migrate to callee-saved registers
-        mov     rsi, [FIELDS_ARRAY+0x8*r12]  ; move field to read from into source index
+        mov     rsi, [FIELDS_ARRAY+8*r12]  ; move field to read from into source index
         mov     rax, r12        ; move current field to read from into rax
         xor     rax, 0x1        ; flip it to get the field to write to
-        mov     rdi, [FIELDS_ARRAY+0x8+rax]  ; move field to write to into destination index
+        mov     rdi, [FIELDS_ARRAY+8*rax]  ; move field to write to into destination index
 
         xor     r13, r13        ; clear r13 and use it as row index
         .for_row:  ; iterate through all rows of the game field
