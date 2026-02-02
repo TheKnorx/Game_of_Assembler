@@ -7,7 +7,7 @@ global try_alloc_fields, free_fields
 ; Project internal functions and variables
 extern FIELD_AREA, FIELDS_ARRAY
 ; glibc functions and variables
-extern calloc, _exit, NULL, perror
+extern calloc, _exit, NULL, perror, free
 
 ; Try to allocate space for the two game fields
 ; If calloc returns with an, we exit from the program --> !We might not return from this function!
