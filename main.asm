@@ -19,7 +19,7 @@ global FIELD_WIDTH, FIELD_HEIGHT, FIELD_AREA, FIELDS_ARRAY
 ; project functions that may not return
 extern try_ascii_to_int, try_alloc_fields
 ; project functions (that always return)
-extern configure_field, free_fields, decide_cell_state, decide_cell_state
+extern configure_field, free_fields, decide_cell_state, decide_cell_state, clear_field
 ; glibc functions:
 extern printf
 
@@ -50,6 +50,14 @@ simulate:
         mov     rax, r12        ; move current field to read from into rax
         xor     rax, 0x1        ; flip it to get the field to write to
         mov     rdi, [FIELDS_ARRAY+8*rax]  ; move field to write to into destination index
+
+        ; on every new generation we have to clear the field we will write to to not have an interference with cells of previous generations
+        ; luckily, the field to write to is already in rdi but we also have to preserve all the registers --> we can re-use r13 and r14 for that
+        mov     r13, rsi        ; save rsi in r13 for now
+        mov     r14, rdi        ; save rdi in r14 for now
+        call    clear_field     ; clear the field to write to
+        mov     rsi, r13        ; restore rsi from r13
+        mov     rdi, r14        ; restore rdi from r14
 
         xor     r13, r13        ; clear r13 and use it as row index
         .for_row:  ; iterate through all rows of the game field
