@@ -100,7 +100,7 @@ try_write_game_field:
     ; int fprintf(FILE *restrict stream,
     ;             const char *restrict format, ...);
     xor     rax, rax                ; clear rax
-    mov     rdi, CURRENT_FILESTREAM ; parameter FILE *restrict stream
+    mov     rdi, [CURRENT_FILESTREAM] ; parameter FILE *restrict stream
     mov     rsi, FILE_PREMABEL      ; parameter const char *restrict format
     mov     rdx, [FIELD_WIDTH]      ; first format parameter
     mov     rcx, [FIELD_HEIGHT]     ; second format parameter
@@ -118,11 +118,20 @@ try_write_game_field:
         xor     rax, rax        ; clear rax
         xor     rdi, rdi        ; clear rdi
         mov     dil, [r13+r12]  ; move current cell into rdi (8 bit dil) --> parameter int c
-        mov     rsi, CURRENT_FILESTREAM  ; parameter FILE *stream
+        cmp     dil, 0x00       ; if there is no cell there, write a '0' to the file --> .dead
+        jne     .alive          ; else write a '1' to the file --> .alive
+        .dead:
+            mov     dil, '0'    ; move the '0' char into dil
+            jmp     .write      ; skip the .alive part and write char into file
+        .alive:
+            mov     dil, '1'    ; move the '1' char into dil
+        .write:
+        ; write char into file
+        mov     rsi, [CURRENT_FILESTREAM]  ; parameter FILE *stream
         call    fputc           ; write cell into file (--> gets buffered most likely by stdout)
 
-        inc     r12         ; r12++ (index++)
-        jmp     .for        ; continue the loop
+        inc     r12             ; r12++ (index++)
+        jmp     .for            ; continue the loop
 
 
     .failed:  ; print the error text alongside with additional error information and exit the program
