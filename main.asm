@@ -17,9 +17,9 @@ section .text
 global main
 global FIELD_WIDTH, FIELD_HEIGHT, FIELD_AREA, FIELDS_ARRAY
 ; project functions that may not return
-extern try_ascii_to_int, try_alloc_fields
+extern try_alloc_fields
 ; project functions (that always return)
-extern configure_field, free_fields, decide_cell_state, decide_cell_state, clear_field
+extern configure_field, free_fields, decide_cell_state, decide_cell_state, clear_field, ascii_to_int, try_write_game_field
 ; glibc functions:
 extern printf
 
@@ -41,7 +41,8 @@ simulate:
 
     mov     rbx, [GENERATIONS]  ; move generations into index variable
     .for_generation:  ; iterate through all generations simulating them
-        dec     rbx             ; rbx--
+        cmp     rbx, 0          ; if rbx > 0 meaning still have to simulate some generations (>= cause of the initial dec at begin of loop)
+        jle     .return         ; else we break the loop and return to main function
         xor     r12, 0x1        ; flip the current field to use
 
         ; init source and destination register with correct pointer
@@ -84,11 +85,8 @@ simulate:
             cmp     r13, [FIELD_HEIGHT]; if r13 < FIELD_HEIGHT
             jb      .for_row        ;    we continue the loop 
             ; else we fall through and enter the next generation
-
-        cmp     rbx, 0          ; if rbx >= 0 meaning still have to simulate some generations (>= cause of the initial dec at begin of loop)
-        jge     .for_generation ;   continue the loop
-        ; if we got here that means the loop is finished, we simulated all generations, and we begin teardown of program
-        ; fall through to return procedure
+        dec     rbx             ; rbx--
+        jmp     .for_generation ; continue the loop
 
     .return: 
         ; Restore pushed registers
@@ -122,17 +120,17 @@ main:
 
         ; get field width: 
         mov     rdi, [r12 + 0x8]    ; ptr to ascii encoded field width number
-        call    try_ascii_to_int    ; convert ascii number to actual integer 
+        call    ascii_to_int    ; convert ascii number to actual integer 
         mov     [FIELD_WIDTH], rax  ; move int into field width variable
 
         ; get field height
         mov     rdi, [r12+0x8*2]    ; ptr to ascii encoded field height number
-        call    try_ascii_to_int    ; convert ascii number to actual integer
+        call    ascii_to_int    ; convert ascii number to actual integer
         mov     [FIELD_HEIGHT], rax ; move int into field height variable
 
         ; get amount of generations to simulate
         mov     rdi, [r12+0x8*3]    ; ptr to ascii encoded generation number
-        call    try_ascii_to_int    ; convert ascii number to actuall integer
+        call    ascii_to_int    ; convert ascii number to actuall integer
         mov     [GENERATIONS], rax  ; move int into generations variable
 
         ; calculate the field area
@@ -153,6 +151,12 @@ main:
     .init_field:  ; init the game field; !we might not get back from this procedure!
         call    try_alloc_fields    ; allocate the two game fields
         call    configure_field     ; now we fill the field with some predefined values
+
+    ; write game field to start into file
+    ; (int* field_to_save, int generation)[]
+    mov     rdi, [FIELDS_ARRAY]     ; move pointer to first gma field into rdi
+    mov     rsi, 0                  ; we are at the first/0th generation
+    call    try_write_game_field
 
     call    simulate        ; simulate the generations
 
