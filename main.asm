@@ -68,7 +68,7 @@ simulate:
                 push    rsi             ; save rsi onto stack
 
                 ; now we have to pass the field to read, the field to write to the decide_cell_state function
-                ; along with the row and column index of the cell --> luckily all first two things are correctly loaded
+                ; along with the row and column index of the cell --> luckily the first two things are already correctly loaded
                 mov     rdx, r13        ; move row index into parameter register rdx 
                 mov     rcx, r14        ; move column index into parameter register rcx (--> thats why we cannot use rcx for counter stuff - gets garbled)
                 call    decide_cell_state  ; let this function decide what to do with the cell
@@ -85,6 +85,8 @@ simulate:
             cmp     r13, [FIELD_HEIGHT]; if r13 < FIELD_HEIGHT
             jb      .for_row        ;    we continue the loop 
             ; else we fall through and enter the next generation
+
+        call    try_write_game_field  ; write current generation to file; !we might not return from this function! 
         dec     rbx             ; rbx--
         jmp     .for_generation ; continue the loop
 
@@ -111,7 +113,7 @@ main:
     ; Additional registers for additional storage:
     push    r12
 
-    .read_cmd_args:     ; check existance of cmd arguments and fill variables accordingly; !we might not get back from this procedure!
+    .read_cmd_args:     ; check existance of cmd arguments and fill variables accordingly; !we might not get back from this section!
         cmp     rdi, 0x4            ; check if all 3 (+1) arguments were passed to the program
         jne     .print_usage        ; if there are cmd args missing, print usage and exit
         ; else continue to parse arguments
@@ -146,9 +148,9 @@ main:
         ;    mov     [FIELD_AREA], rax       ; we do this by just writing the upper/left bits of the result into the field area variable
         ;    ; fall through to next procedure
         mov     [FIELD_AREA], rax       ; move result of MUL into field are variable
-        ; fall through to next procedure
+        ; fall through to next section
 
-    .init_field:  ; init the game field; !we might not get back from this procedure!
+    .init_field:  ; init the game field; !we might not get back from this section!
         call    try_alloc_fields    ; allocate the two game fields
         call    configure_field     ; now we fill the field with some predefined values
 
@@ -156,7 +158,7 @@ main:
     ; (int* field_to_save, int generation)[]
     mov     rdi, [FIELDS_ARRAY]     ; move pointer to first gma field into rdi
     mov     rsi, 0                  ; we are at the first/0th generation
-    call    try_write_game_field
+    call    try_write_game_field    ; write first game field to file; !we might not return from this call!
 
     call    simulate        ; simulate the generations
 
@@ -171,7 +173,7 @@ main:
         mov     rdi, USAGE_TEXT     ; const char* to format string
         mov     rsi, [rsi]          ; const char* to first format parameter
         call    printf
-        ; fall through to .return procedure
+        ; fall through to .return section
 
     .return:  ; pop any pushed registers & do the epilog
         ;  pop pushed registers
