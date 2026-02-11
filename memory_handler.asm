@@ -7,16 +7,17 @@ global try_alloc_fields, free_fields, clear_field
 ; Project internal functions and variables
 extern FIELD_AREA, FIELDS_ARRAY
 ; glibc functions and variables
-extern calloc, _exit, NULL, perror, free
+extern _exit, perror
+; core.lib functions
+extern sys_calloc, sys_free
+
+%include "core.lib.inc"
 
 ; Try to allocate space for the two game fields
 ; If calloc returns with an, we exit from the program --> !We might not return from this function!
 ; (-)[-]
 try_alloc_fields:  
-    ; Prolog
-    push    rbp
-    mov     rbp, rsp
-    and     rsp, -16
+    .enter: ENTER
 
     push    r12             ; make r12 available for storage
     xor     r12, r12        ; index for loop --> set to 0
@@ -26,10 +27,10 @@ try_alloc_fields:
 
         ; allocate a game field and store it in the fields_array
         ; void *calloc(size_t nmemb, size_t size);
-        xor     rax, rax        ; clear rax
-        mov     rdi, [FIELD_AREA]; size_t nmemb
-        mov     rsi, 0x1        ; allocate nmemb units of size 1 byte
-        call    calloc          ; pointer to allocated memory in rax
+        ;xor     rax, rax        ; clear rax
+        mov     rdi, [FIELD_AREA]; parameter nmemb
+        mov     rsi, 0x1        ; parameter size - allocate nmemb units of size 1 byte
+        call    sys_calloc      ; allocate memory --> rax = pointer to allocated memory
         test    rax, rax        ; if rax == NULL, the allocation failed
         jz      .failed         ;   and we print a error message and exit the program
         mov     [FIELDS_ARRAY+0x8*r12], rax  ; store pointer at correct array index in FIELDS_ARRAY
@@ -42,7 +43,7 @@ try_alloc_fields:
         pop     r12
         ; void perror(const char *s);
         xor     rax, rax        ; clear rax
-        mov     rdi, ALLOC_ERROR_TEXT   ;const chat *s
+        mov     rdi, ALLOC_ERROR_TEXT  ; parameter s
         call    perror
         mov     rax, -1         ; move exit code into rax
         call    _exit           ; exit the program
@@ -50,9 +51,7 @@ try_alloc_fields:
 
     .return:
         pop     r12         ; pop the pushed register
-        ; Epilog
-        mov     rsp, rbp
-        pop     rbp
+        LEAVE
         ret
 
 
@@ -76,10 +75,7 @@ clear_field:
 ; free the allocated game field stored at the FIELDS_ARRAY array
 ; (-)[-]
 free_fields:  
-    ; Prolog
-    push    rbp
-    mov     rbp, rsp
-    and     rsp, -16
+    .enter: ENTER
 
     push    r12             ; make r12 available for storage
     xor     r12, r12        ; index for loop --> set to 0
@@ -89,16 +85,14 @@ free_fields:
 
         ; free the allocated game fields
         ; void free(void *_Nullable ptr);
-        xor     rax, rax        ; clear rax
-        mov     rdi, [FIELDS_ARRAY+0x8*r12]; *_Nullable ptr
-        call    free            ; free allocated memory --> free has no return value
+        ;xor     rax, rax        ; clear rax
+        mov     rdi, [FIELDS_ARRAY+0x8*r12]; parameter ptr
+        call    sys_free            ; free allocated memory --> free has no return value
         ; continue allocating the next game field
         inc     r12             ; r12++
         jmp     .for            ; continue to next loop iteration
 
     .return:
         pop     r12         ; pop the pushed register
-        ; Epilog
-        mov     rsp, rbp
-        pop     rbp
+        LEAVE
         ret
