@@ -5,10 +5,10 @@ section .text
 global configure_field, decide_cell_state
 ; Project internal functions and variables
 extern FIELDS_ARRAY, FIELD_WIDTH, FIELD_AREA, FIELD_HEIGHT
-; debug functions: 
-extern print_neighbour, print_new_cell_state
-; glibc functions
+; core.lib functions and macros
+extern ENTER, LEAVE
 
+%include "core.lib.inc"
 
 ; macro for checking if we found a neigbour and if so, increment the neighbour counter
 ; possible neighbour at al, neighbour counter at r13
@@ -111,43 +111,14 @@ _get_coordinate:
     add     rax, r9             ; add x to y
     ret
 
-; procedure for accessing the game field, given a 2d coordinate (x|y),
-; and returning the value from that position
-; coordinates are already modolo'd, so access via them is save (we assume!, if not we are fucked)
-; !We pass the coordinate in switched order!
-; (int* field_to_write, int y, int x)[int a]
-; OBSOLETE: moved part of procedure to _get_coordinate and the other part into a macro
-_OBSOLETE_access_field: 
-    ; begin by first converting y to a 1d representation
-    mov     rax, rsi            ; move rsi/y into rax for MUL operation
-    mov     r9, rdx             ; save rdx/x to r9 for later use
-    xor     rdx, rdx            ; clear rdx so it doesnt mess with the MUL --> RDX:RAX
-    mov     rcx, [FIELD_WIDTH]  ; move field_width into rcx
-    mul     rcx                 ; rax*rcx --> y*field_width --> result in rax
-
-    ; now add the x coordinate to the 1d representation of y, 
-    ; creating the full 1d representation of the coordinate (x, y)
-    add     rax, r9             ; add x to y
-
-    ; access the field with the calculated 1d coordinate
-    mov     al, [rdi+rax]       ; access the field with rdi+rax and write the value back to rax
-    movzx   rax, al             ; migrate al into rax
-    ret                         ; return from procedure - return value is already in rax
-
 
 ; Given a row and column coordinate of a cell, determin the state of this cell and its neighbours
 ; and based on those findings decide whether the cell should live or not
 ; Then write the result to the game field --> this function abstracts completely from the main executable section 
-; the handling and building of coordinates, as well the reading and writing of cell-information to the correct fields
-; 
-; PROBLEM: We mix 1d row_indexs with 2d row_index, especially in the modolo calculations --> stick to one
-; 
+; the handling and building of coordinates, as well the reading and writing of cell-information to the correct fields 
 ; (int* field_to_write @ rdi, int* field_to_read @ rsi, int row_index @ rdx, int column_index @ rcx)[-]
 decide_cell_state:
-    ; Prolog
-    push    rbp
-    mov     rbp, rsp
-    and     rsp, -16
+    .enter: ENTER
 
     push    rsi                 ; push field_to_read to stack   --> access via @rbp-8   --> _FIELD_TO_READ_MEM
     push    rdi                 ; push field_to_write to stack  --> access via @rbp-2*8 --> _FIELD_TO_WRITE_MEM
@@ -163,7 +134,7 @@ decide_cell_state:
 
     ; if (field_to_read[row_index][ _modolo(column_index-1, FIELD_WIDTH) ]) neigbours++;
     .left: 
-        ; mod(col-1, WIDTH)
+        ; mod(column_index-1, FIELD_WIDTH)
         mov     rdi, r15        ; move column_index into rdi
         sub     rdi, 1          ; subtract 1 from it
         mov     rsi, [FIELD_WIDTH]; move field_width into rsi
@@ -177,7 +148,7 @@ decide_cell_state:
 
     ; if (field_to_read[row_index][ _modolo(column_index+1, FIELD_WIDTH) ]) neigbours++;
     .right: 
-        ; mod(col+1, WIDTH)
+        ; mod(column_index+1, FIELD_WIDTH)
         mov     rdi, r15        ; move column_index into rdi
         add     rdi, 1          ; add 1 to it
         mov     rsi, [FIELD_WIDTH]; move field_width into rsi
@@ -265,7 +236,7 @@ decide_cell_state:
         ; else its dead --> fall through to .dead
         .dead: ; only if the cell as 3 neighbours, it revives. 
             cmp     r13, 0x03   ; compare the neighbours count to 3
-            jne     .return     ; if the neighbours count != 3, skip it end jmp to .return section 
+            jne     .leave      ; if the neighbours count != 3, skip it exit from function
             jmp     .write_back ; else revive the cell --> jump to write_back of a 1 into the current location
         .alive: ; if neighbours e {2, 3}, the cell continues to live. Else it dies
             cmp     r13, 0x02   ; compare the neighbours count to 2
@@ -276,7 +247,7 @@ decide_cell_state:
 
             and     al, cl      ; if 2 <= neighbours <= 3, then an AND should result in 1, else it would be 0
             test    al, al      ; test outcome of AND operation
-            jz     .return      ; al is 0, meaning it has too many neighbours, meaning we kill it, meaning we jmp straight to the return section 
+            jz     .leave       ; al is 0, meaning it has too many neighbours, meaning we kill it, meaning we exit the function
             ; else fall through to the write_back
         .write_back:
             mov     rdi, [rbp-16]; move field_to_write into rdi
@@ -285,7 +256,7 @@ decide_cell_state:
             call    _get_coordinate; get the 1d coordinate
             mov     byte [rdi + rax], 0x01; set cell from rdi at the calculated coordinate to alive
 
-    .return: 
+    .leave: 
         ; restore all pushed register
         pop     r15
         pop     r14
@@ -293,7 +264,5 @@ decide_cell_state:
         pop     r12
         pop     rbx
         add     rsp, 0x10       ; remove pushed rdi and rsi from stack
-        ; Epilog
-        mov     rsp, rbp
-        pop     rbp
-        ret
+        LEAVE
+    .return: ret
