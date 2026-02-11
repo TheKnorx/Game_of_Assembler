@@ -22,5 +22,9 @@
 
 %define MREMAP_MAYMOVE 	0x01
 
-%define MAP_FAILED		-1 ; ((void *) -1)
+
+; memory allocator constants
+%define MEM_HEAD_LEN	0x01
+
+; %define MAP_FAILED		-1 ; ((void *) -1)
 ; %define MAP_FAILED		(~1)+1 ; ((void *) -1)

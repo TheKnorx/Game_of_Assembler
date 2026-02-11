@@ -20,8 +20,11 @@
 
 
 section .bss
+    SYS_ERRNO:  resd 0x01   ; custome errno status variable
 section .data
 section .text
+
+global SYS_ERRNO
 
 %include "core.lib.inc"
 
@@ -37,6 +40,11 @@ section .text
 %macro LEAVE 0
     mov     rsp, rbp
     pop     rbp
+%endmacro
+
+%macro SET_ERRNO 0
+    neg     eax             ; negate rax
+    mov     [SYS_ERRNO], eax; store the value in eax into sys_errno
 %endmacro
 
 
@@ -61,7 +69,6 @@ sys_printf:
 ; >>> void *mmap(void addr[.length], size_t length, int prot, int flags,
 ;                int fd, off_t offset);
 ; <<< if size == 0: return invalid pointer NULL
-; <<< if size < 0: size = size_t % size (cause size_t is unsigned)
 sys_malloc: 
     .enter: ENTER
 
@@ -71,8 +78,8 @@ sys_malloc:
 
     mov     rax, SYS_MMAP ; move syscall number into rax
     mov     rsi, rdi    ; parameter length = size_t size in rdi
-    add     rsi, 0x08   ; add additional 64-bit (8-byte) for headers and stuff to size
-    push    rsi         ; push (new) size of memory to stack for later use - stack alignment doesnt matter now
+    add     rsi, MEM_HEAD_LEN  ; add to length additional bytes for header
+    push    rsi         ; push length to stack for later use - stack alignment doesnt matter now
     xor     rdi, rdi    ; parameter addr[.length] = NULL
     mov     rdx, PROT_READ | PROT_WRITE ; parameter prot
     mov     r10, MAP_PRIVATE | MAP_ANONYMOUS ; parameter flags
@@ -80,16 +87,20 @@ sys_malloc:
     xor     r9, r9      ; parameter offset = 0
     syscall             ; Execute mmap --> rax = addr of allocated memory or MAP_FAILED
 
-    cmp     rax, MAP_FAILED ; compare if rax is invalid / mmap failed 
-    je      .invalid        ; if its invalid, set rax to NULL and return from this function 
+    test     rax, rax       ; check if rax is invalid / mmap failed 
+    js      .error          ; if its invalid meaning negative, set rax to NULL and exit this function 
     ; else write allocation information into the memory block
-    pop     rsi             ; get pushed value of memory size from stack
+    pop     rsi             ; get length from stack
     mov     [rax], rsi      ; move into the memory region the size of it that we pushed onto stack before
-    lea     rax, [rax+8]    ; add 64-bit/8-byte to the pointer -> rax now points to usable memory
-    jmp     .leave          ; return from function - pushed rsp is removed with epilog
+    lea     rax, [rax+MEM_HEAD_LEN]  ; add len of header to the pointer -> rax now points to usable memory
+    jmp     .leave          ; leave and return from function
 
+    .error:
+        SET_ERRNO           ; set sys_errno with the value in rax (-eax)
+        pop     rax         ; clear the pushed length
+        ; also fall through to invalid section
     .invalid: 
-        mov     rax, NULL  ; move NULL into rax
+        mov     rax, NULL   ; move NULL into rax
     .leave: LEAVE
     .return: ret
 
@@ -99,7 +110,7 @@ sys_malloc:
 ; --> needed libcalls: sys_malloc, sys_memset
 ; >>> void *malloc(size_t size);
 ; >>> void *memset(void s[.n], int c, size_t n);
-; <<< if nmemb * size > sizeof(int): we dont care and pass it to malloc where size = size_t % size
+; <<< if nmemb * size doesnt fit rax when multiplying, we ignore it and use rax anyways
 sys_calloc: 
     .enter: ENTER
 
@@ -110,15 +121,17 @@ sys_calloc:
     mov     rdi, rax    ; parameter size = calculated memory size
     call    sys_malloc  ; allocate memory with sys_malloc --> ptr in rax
 
-    cmp     rax, NULL   ; compare if rax contains a valid pointer
-    je      .leave      ; if it does not, immediately return from function
+    test     rax, rax   ; compare if rax contains a valid pointer
+    jz      .invalid    ; if it does not, immediately exit the function
     ; else zero out the memory
     mov     rdi, rax    ; parameter s[.n] = move pointer to memory into rdi
     mov     rsi, 0x00   ; parameter c = 0x00 (empty byte)
-    mov     rdx, [rsp]  ; parameter n = pushed size of memory from stack
+    pop     rdx         ; parameter n = size of memory pushed to stack from earlier
     call    sys_memset  ; set memory at adress in rdi to 0x00
-    ; fall through to leave section -> pushed memory size will be removed in epilog
+    jmp     .leave      ; leave and return from function
 
+    .invalid: 
+        add     rsp, 0x08  ; remove pushed rax without poping it
     .leave: LEAVE
     .return: ret
 
@@ -128,24 +141,41 @@ sys_calloc:
 ; --> needed syscalls: mremap
 ; >>> void *mremap(void old_address[.old_size], size_t old_size,
 ;              size_t new_size, int flags, ... /* void *new_address */);
-; <<< as this is implemented with 'mremap`, its behavior follows the mremap convention, not the realloc convention!
-; <<< on failiure, we return the old address of the old memory but no guarantee that the address is usable
+; <<< On error, we return the old pointer, but also set an errror-code (that follow the mremap convention for better debugging)
 sys_realloc: 
     .enter: ENTER
-    push    rdi             ; save old address to memory to stack for potential later use
+
+    test    rdi, rdi        ; check if ptr is NULL or not
+    jnz     .do_realloc     ; if its not NULL, proceed with a normal realloc
+    ; else do a malloc like its specified in the standard: if ptr == NULL, then its like a malloc(size) call
+    .do_malloc:
+        mov     rdi, rsi    ; parameter size - discard NULL-ptr in rdi
+        call    sys_malloc  ; allocate memory using sys_malloc --> rax = ptr to memory or NULL on error
+        jmp     .leave      ; exit function
+    .do_realloc:
+    push    rdi             ; save parameter ptr to stack for potential later use
 
     mov     rax, SYS_MREMAP ; move syscall number into rax
-    lea     rdi, [rdi-8]    ; parameter old_address[.old_size] - subtract 64-bits (8-bytes) from pointer
-    mov     rdx, rsi        ; parameter: new_size - add passed new size from rsi into rdx
-    mov     rsi, [rdi]      ; parameter old_size - move size of memory into rsi
-    mov     r10, MREMAP_MAYMOVE  ; parameter int flags
-    syscall                 ; execute mremap --> rax = new address
-    cmp     rax, MAP_FAILED ; check if rax is invalid / mremap failed 
-    jne     .leave          ; if its a valid pointer, then leave and return from this function
-    ; else we set the pointer to NULL
-    .invalid:
+    lea     rdi, [rdi-MEM_HEAD_LEN] ; parameter old_address[.old_size] from parameter ptr in rdi (- len of header)
+    lea     rdx, [rsi+MEM_HEAD_LEN] ; parameter new_size from parameter size in rsi (+ len of header)
+    push    rdx             ; save parameter new_size in stack for later use
+    mov     rsi, [rdi]      ; parameter old_size - stored in head of memory region
+    mov     r10, MREMAP_MAYMOVE     ; parameter int flags
+    syscall                 ; execute mremap --> rax = new address or neg number on error
+    test    rax, rax        ; check if rax is a negativ number, meaning if we got an error
+    js     .invalid         ; if the syscall returned an error, jmp to .invalid
+
+    ; else add the size of the new memory region into the memory region
+    pop     rsi             ; get new_size from stack
+    mov     [rax], rsi      ; write new_size into memory header
+    lea     rax, [rax+MEM_HEAD_LEN] ; move into rax the user-pointer
+    add     rsp, 0x08       ; remove pushed parameter ptr from stack without poping it
+    jmp     .leave          ; leave and return from function
+
+    .invalid:  ; set rax to previous pointer to old memory
+        SET_ERRNO           ; set sys_errno with the value in rax (-eax)
+        pop     rax         ; clear the new_size from stack 
         pop     rax         ; get pushed old address from stack and save into rax
-    ; pushed value will be automatically removed by epilog
     .leave: LEAVE
     .return: ret
 
@@ -156,19 +186,22 @@ sys_realloc:
 ; >>> int munmap(void addr[.length], size_t length)
 ; <<< if munmap returned with an error, we also return the error here, but dont really care about it --> just in case
 sys_free:
-    .enter: ENTER 
+    ; no prolog or epilod needed
 
     cmp     rdi, NULL       ; compare if parameter ptr is 0
-    je      .leave          ; if its NULL, we do nothing
+    je      .return          ; if its NULL, we do nothing
     ; else we free the memory
 
     mov     rax, SYS_MUNMAP ; move syscall number into rax
-    lea     rdi, [rdi-8]    ; parameter ptr - subtract the header-area from memory pointer
+    lea     rdi, [rdi-MEM_HEAD_LEN]  ; parameter ptr - subtract the header-area from memory pointer
     mov     rsi, [rdi]      ; parameter length - is stored in the first 8 byte of the memory
     syscall                 ; free the memory pointed to by parameter ptr --> rax = success/error
-    ; anyways - return with rax, although we dont really need to 
+    test    rax, rax        ; check if munmap failed
+    js      .invalid        ; if there was an error, set SYS_ERRNO
+    jmp     .return         ; else just leave and return from this function
 
-    .leave: LEAVE
+    .invalid: 
+        SET_ERRNO           ; set sys_errno with the value in rax (-eax)
     .return: ret
     
     
@@ -177,17 +210,16 @@ sys_free:
 ; size_t strlen(const char *s);
 ; --> needed syscalls: -
 sys_strlen: 
-    .enter: ENTER
+    ; no prolog or epilog needed
 
-    xor     rax, rax        ; clear rax and use it for length storage
-    xor     rcx, rcx        ; clear index
+    xor     rax, rax        ; clear rax and use it as an index and for the length storage
     .for: 
-        cmp     byte [rdi+rcx], 0x00 ; compare current char to null-terminator
-        je      .leave     ; if it matches, return from function
+        cmp     byte [rdi+rax], 0x00 ; compare current char to null-terminator
+        je      .return     ; if it matches, return from function
         inc     rax         ; increment length
         jmp     .for        ; continue the loop
 
-    .leave: LEAVE
+    sub     rax, 0x01       ; we have to exclude the null terminator
     .return: ret
 
 ; Replacement-function for:
@@ -197,9 +229,11 @@ sys_memset:
     ; no prolog or epilog needed 
 
     ; rdi - parameter s[.n] - rdi already contains destination memory address
+    mov     r9, rdi     ; save s[.n] into r9 for later use
     mov     rcx, rdx    ; move parameter n into counter register
     mov     al, sil     ; move parameter c into al
     cld                 ; clear direction flag so that we overwrite upwards from the base memory address
     rep stosb           ; overwrite whole allocated memory with char in al
 
+    mov     rax, r9     ; move r9/s[.n] into rax for returning
     .return: ret
