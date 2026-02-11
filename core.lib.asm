@@ -28,20 +28,6 @@ global SYS_ERRNO, sys_malloc, sys_free, sys_realloc, sys_memset
 
 %include "core.lib.inc"
 
-; macro for doing the prolog
-%macro ENTER 0
-    push    rbp
-    mov     rbp, rsp
-    sub     rsp, -16        ; align the stack to multiple of 16
-%endmacro
-
-; macro for doing the epilog
-; not using 'leave` here cause of performance
-%macro LEAVE 0
-    mov     rsp, rbp
-    pop     rbp
-%endmacro
-
 %macro SET_ERRNO 0
     neg     eax             ; negate rax
     mov     [SYS_ERRNO], eax; store the value in eax into sys_errno
@@ -59,8 +45,9 @@ sys_printf:
 
 
 
-    .leave: LEAVE
-    ret
+    .return: 
+        LEAVE
+        ret
 
 
 ; Replacement-function for: 
@@ -93,7 +80,7 @@ sys_malloc:
     pop     rsi             ; get length from stack
     mov     [rax], rsi      ; move into the memory region the size of it that we pushed onto stack before
     lea     rax, [rax+MEM_HEAD_LEN]  ; add len of header to the pointer -> rax now points to usable memory
-    jmp     .leave          ; leave and return from function
+    jmp     .return          ; return from function
 
     .error:
         SET_ERRNO           ; set sys_errno with the value in rax (-eax)
@@ -101,8 +88,9 @@ sys_malloc:
         ; also fall through to invalid section
     .invalid: 
         mov     rax, NULL   ; move NULL into rax
-    .leave: LEAVE
-    .return: ret
+    .return:
+        LEAVE
+        ret
 
 
 ; Replacement-function for: 
@@ -128,12 +116,13 @@ sys_calloc:
     mov     rsi, 0x00   ; parameter c = 0x00 (empty byte)
     pop     rdx         ; parameter n = size of memory pushed to stack from earlier
     call    sys_memset  ; set memory at adress in rdi to 0x00
-    jmp     .leave      ; leave and return from function
+    jmp     .return     ; return from function
 
     .invalid: 
         add     rsp, 0x08  ; remove pushed rax without poping it
-    .leave: LEAVE
-    .return: ret
+    .return: 
+        LEAVE
+        ret
 
 
 ; Replacement-function for: 
@@ -151,7 +140,7 @@ sys_realloc:
     .do_malloc:
         mov     rdi, rsi    ; parameter size - discard NULL-ptr in rdi
         call    sys_malloc  ; allocate memory using sys_malloc --> rax = ptr to memory or NULL on error
-        jmp     .leave      ; exit function
+        jmp     .return     ; return from function
     .do_realloc:
     push    rdi             ; save parameter ptr to stack for potential later use
 
@@ -170,14 +159,15 @@ sys_realloc:
     mov     [rax], rsi      ; write new_size into memory header
     lea     rax, [rax+MEM_HEAD_LEN] ; move into rax the user-pointer
     add     rsp, 0x08       ; remove pushed parameter ptr from stack without poping it
-    jmp     .leave          ; leave and return from function
+    jmp     .return         ; return from function
 
     .invalid:  ; set rax to previous pointer to old memory
         SET_ERRNO           ; set sys_errno with the value in rax (-eax)
         pop     rax         ; clear the new_size from stack 
         pop     rax         ; get pushed old address from stack and save into rax
-    .leave: LEAVE
-    .return: ret
+    .return: 
+        LEAVE
+        ret
 
 
 ; Replacement-function for: 
