@@ -48,7 +48,7 @@ $(TARGET): $(OBJS)
 
 clean:
 	@printf 'Cleaning up ... removing build directory, target, and gol_* files ...\n'
-	@rm -rf "$(BUILD_DIR)" "$(TARGET)"
+	@rm -rf "$(BUILD_DIR)" "$(TARGET)" gol_*
 
 # Sanitize all files - replace all tabs with spaces to have a nice and clean layout
 sanitize_files:
