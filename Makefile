@@ -22,7 +22,7 @@ LDFLAGS   ?= -no-pie
 TARGET := main
 
 # List your asm sources explicitly (keeps ordering stable & obvious)
-SRCS := main.asm io_handler.asm memory_handler.asm field_handler.asm DEBUG_helper.asm core.lib.asm 
+SRCS := main.asm io_handler.asm memory_handler.asm field_handler.asm DEBUG_helper.asm core.lib.asm
 
 BUILD_DIR := build
 OBJS := $(patsubst %.asm,$(BUILD_DIR)/%.o,$(SRCS))
@@ -45,6 +45,15 @@ $(TARGET): $(OBJS)
 	@printf '\n== Linking -> %s/%s ==\n' "$$(pwd)" "$(TARGET)"
 	@$(CC) $(LDFLAGS) $(OBJS) -o "$(TARGET)" 2>&1 | sed 's/^/  /'
 	@printf '\nBuild successful: %s/%s\n' "$$(pwd)" "$(TARGET)"
+
+test: test.asm core.lib.asm core.lib.inc
+	nasm -f elf64 -g test.asm -o test.o
+	nasm -f elf64 -g core.lib.asm -o core.lib.o
+	ld -o test test.o core.lib.o
+	rm -f test.o core.lib.o
+
+clean-test:
+	rm -f test test.o core.lib.o
 
 clean:
 	@printf 'Cleaning up ... removing build directory, target, and gol_* files ...\n'
