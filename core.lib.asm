@@ -29,8 +29,6 @@ section .data
     STDIO_BUFFER_SIZE:  equ     0x0200  ; allocate 512 bytes for this stdio buffer  
 section .text
 
-; global SYS_ERRNO, sys_malloc, sys_free, sys_realloc, sys_memset, sys_calloc, sys_strlen, sys_atoi, sys_exit
-
 %include "core.lib.inc"
 
 %macro SET_ERRNO 0
@@ -66,6 +64,7 @@ sys_perror: nop
 ; >>> int fflush(FILE *_Nullable stream);
 ; <<< as we dont test if the write would succeed everytime, EOF as error indicator is only returned when flushing the buffer - not before!
 ; <<< we dont really accept a FILE* object as second parameter (for fputc) but rather just a file-descriptor
+global sys_fputc
 sys_fputc: 
     .enter: ENTER
 
@@ -113,6 +112,7 @@ sys_fputc:
 ; <<< we only need the file-descriptor passed to write - not like glibc where those infos are extracted out of the FILE* stream object
 ; <<< consequently the FILE* stream object is only a file-descriptor, not a real FILE* object like in glibc
 ; <<< we also consider the not-writing of all bytes in the buffer a hard error and return with EOF!
+global sys_fflush
 sys_fflush:
     .enter: ENTER
 
@@ -156,6 +156,7 @@ sys_fflush:
 ; >>> void *mmap(void addr[.length], size_t length, int prot, int flags,
 ;                int fd, off_t offset);
 ; <<< if size == 0: return invalid pointer NULL
+global sys_malloc
 sys_malloc: 
     .enter: ENTER
 
@@ -199,6 +200,7 @@ sys_malloc:
 ; >>> void *malloc(size_t size);
 ; >>> void *memset(void s[.n], int c, size_t n);
 ; <<< if nmemb * size doesnt fit rax when multiplying, we ignore it and use rax anyways
+global sys_calloc
 sys_calloc: 
     .enter: ENTER
 
@@ -231,6 +233,7 @@ sys_calloc:
 ; >>> void *mremap(void old_address[.old_size], size_t old_size,
 ;              size_t new_size, int flags, ... /* void *new_address */);
 ; <<< On error, we return the old pointer, but also set an errror-code (that follow the mremap convention for better debugging)
+global sys_realloc
 sys_realloc: 
     .enter: ENTER
 
@@ -275,6 +278,7 @@ sys_realloc:
 ; --> needed syscalls: munmap
 ; >>> int munmap(void addr[.length], size_t length)
 ; <<< if munmap returned with an error, we also return the error here, but dont really care about it --> just in case
+global sys_free
 sys_free:
     ; no prolog or epilod needed
 
@@ -297,7 +301,7 @@ sys_free:
     
 ; Replacement-function for: 
 ; size_t strlen(const char *s);
-; --> needed syscalls: -
+global sys_strlen
 sys_strlen: 
     ; no prolog or epilog needed
 
@@ -314,6 +318,7 @@ sys_strlen:
 ; Replacement-function for:
 ; void *memset(void s[.n], int c, size_t n);
 ; --> needed asm-inst: rep stosb
+global sys_memset
 sys_memset:
     ; no prolog or epilog needed 
 
@@ -332,6 +337,7 @@ sys_memset:
 ; void *memcpy(void dest[restrict .n], const void src[restrict .n],
 ;              size_t n);
 ; --> needed asm-inst: rep movsb
+global sys_memcpy
 sys_memcpy:
     ; no prolog or epilog needed 
 
@@ -347,6 +353,7 @@ sys_memcpy:
 
 ; Replacement function for:
 ; int atoi(const char *nptr);
+global sys_atoi
 sys_atoi:  
     .enter: ENTER
 
@@ -376,6 +383,7 @@ sys_atoi:
 ; Replacement function for:
 ; [[noreturn]] void _exit(int status); and [[noreturn]] void _Exit(int status);
 ; --> needed syscalls: exit
+global sys_exit, sys_EXIT
 sys_exit: 
     ; no prolog or epilog needed 
 
