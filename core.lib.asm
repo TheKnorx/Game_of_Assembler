@@ -20,11 +20,16 @@
 
 
 section .bss
-    SYS_ERRNO:  resd 0x01   ; custome errno status variable
+    SYS_ERRNO:          resd    0x01    ; custome errno status variable
+    ; field for saving the pointer of the global stdio buffer --> allocated by _start routine
+    ; As no multithreading is done here, we only implement one big buffer for every stdio operation 
+    STDIO_BUFFER_PTR:   resq    0x01
+    STDIO_BUFFER_INDEX: resw    0x01    ; for saving the current length index-form of the buffer --> for knowing when to flush
 section .data
+    STDIO_BUFFER_SIZE:  equ     0x0200  ; allocate 512 bytes for this stdio buffer  
 section .text
 
-global SYS_ERRNO, sys_malloc, sys_free, sys_realloc, sys_memset, sys_calloc, sys_strlen, sys_atoi
+global SYS_ERRNO, sys_malloc, sys_free, sys_realloc, sys_memset, sys_calloc, sys_strlen, sys_atoi, sys_exit
 
 %include "core.lib.inc"
 
@@ -47,6 +52,86 @@ sys_printf:
 
     .return: 
         LEAVE
+        ret
+
+
+sys_snprintf: nop
+sys_fopen: nop
+sys_fprintf: nop
+sys_perror: nop
+
+; Replacement-function for: 
+; int fputc(int c, FILE *stream)
+; --> needed libcalls: sys_fflush
+; >>> int fflush(FILE *_Nullable stream);
+; <<< as we dont test if the write would succeed everytime, EOF as error indicator is only returned when flushing the buffer - not before!
+; <<< we dont really accept a FILE* object as second parameter but rather just a file-descriptor
+sys_fputc: 
+    mov     r9, rdi             ; save parameter c into r9 for later usage
+    ;cmp     word [STDIO_BUFFER_INDEX], STDIO_BUFFER_SIZE    ; check if the buffer is full
+    ;jb      .write_buffer       ; if len < size: write to buffer
+    ; else flush the buffer
+    jmp     .write_buffer       ; skip the following section
+
+    .flush_buffer: 
+        ; rdi - parameter stream - already in rdi - file descriptor to write to
+        call    sys_fflush      ; flush the stdio buffer
+        test    rax, rax        ; check if rax == 0
+        jnz     .error          ; if rax == 0: return from function as usual 
+        ; else fall through to write_buffer section again 
+
+    .write_buffer:
+        cmp     word [STDIO_BUFFER_INDEX], STDIO_BUFFER_SIZE    ; check if len < sizeof buffer
+        jge     .flush_buffer           ; if len >= sizeof buffer: flush buffer but then fall through to this section again 
+        ; else continue writing into the buffer 
+
+        mov     dx, [STDIO_BUFFER_INDEX]; move into 16-bit register current index of buffer 
+        movzx   rdx, dx                 ; migrate dx into rdx
+        mov     rax, [STDIO_BUFFER_PTR] ; move pointer to stdio buffer into rax
+        mov     [rax+rdx], dil          ; move parameter c (cast to char) into buffer
+        add     [STDIO_BUFFER_LEN], 0x01; len+1 to make it represent the current length of the buffer - usage in fflush!
+        ; return from function
+
+    .normal: 
+        mov     rax, r9b        ; move parameter c into rax (cast to char) for returning
+    .error:  ; skip setting rax as rax is already set with the error from sys_fflush
+    .return: ret
+
+; Replacement-function for: 
+; int fflush(FILE *_Nullable stream);
+; --> needed syscalls: write
+; --> needed libcalls: memset
+; >>> ssize_t write(int fildes, const void *buf, size_t nbyte);
+; >>> void *memset(void s[.n], int c, size_t n);
+; <<< as we always use [STDIO_BUFFER_PTR] as the buf, and STDIO_BUFFER_LEN as nbyte,
+; <<< we only need the file-descriptor passed to write - not like glibc where those infos are extracted out of the FILE* stream object
+; <<< consequently the FILE* stream object is only a file-descriptor, not a real FILE* object like in glibc
+sys_fflush:
+    mov     rax, SYS_WRITE  ; move number of syscall into rax
+    ; rdi - parameter fildes - already passed to fflush via rdi
+    mov     rsi, [STDIO_BUFFER_PTR] ; parameter buf
+    mov     rdx, [STDIO_BUFFER_INDEX]; parameter nbyte-1
+    add     rdx, 0x01       ; add one to rdx --> real nbyte value
+    syscall                 ; write buffer into location of file-descriptor
+    test    rax, rax        ; check if rax is a negative number
+    js      .error          ; if rax < 0: set errno and return from function
+    cmp     rax, rdx        ; else check if bytes written == nbyte
+    jne     .error          ; if they are not equal, set errno and return from function
+    ; else reset all variables and stuff
+    
+    mov     rdi, [STDIO_BUFFER_PTR] ; parameter s[.n]
+    mov     rsi, 0x00               ; parameter c - empty byte
+    mov     rdx, [STDIO_BUFFER_INDEX]; parameter n-1 - just zero out the part of the buffer that we actually used
+    add     rdx, 0x01               ; add 1 to rdx --> real n value
+    call    sys_memset              ; clear the buffer - ignore the return value 
+    mov     word [STDIO_BUFFER_LEN], 0x00  ; zero out len variable
+    jmp     .normal                 ; return from function
+
+    .error: 
+        SET_ERRNO                   ; check syscall for errors and set sys_errno accordingly
+        mov     rax, EOF            ; move EOF constant into rax
+    .normal: xor    rax, rax        ; clear rax as we return with 0 on success
+    .return:
         ret
 
 
@@ -228,6 +313,23 @@ sys_memset:
     .return: ret
 
 
+; Replacement-function for:
+; void *memcpy(void dest[restrict .n], const void src[restrict .n],
+;              size_t n);
+; --> needed asm-inst: rep movsb
+sys_memcpy:
+    ; no prolog or epilog needed 
+
+    ; rdi - parameter dest[restrict .n] - rdi already contains destination memory address
+    ; rsi - parameter src[restrict .n] - rsi already contains the source memory address
+    mov     r9, rdi     ; save s[.n] into r9 for later use
+    mov     rcx, rdx    ; move parameter n into counter register
+    cld                 ; clear direction flag so that we overwrite upwards from the base memory address
+    rep movsb           ; overwrite whole allocated memory with char in al
+
+    mov     rax, r9     ; move r9/s[.n] into rax for returning
+    .return: ret 
+
 ; Replacement function for:
 ; int atoi(const char *nptr);
 sys_atoi:  
@@ -267,4 +369,4 @@ sys_exit:
     syscall                 ; do a hard exit on program - without cleanup, without anything!
     hlt                     ; we should never get to this point
 sys_EXIT: 
-    jmp     _exit           ; we can literally jmp to the _exit implementation as we will never return from it anyways
+    jmp     sys_exit        ; we can literally jmp to the _exit implementation as we will never return from it anyways
