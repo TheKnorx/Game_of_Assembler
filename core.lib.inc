@@ -2,8 +2,10 @@
 
 ; generell constants
 %define NULL 			0x00       ; ((void *) 0)
+%define EOF             -1
 
 ; syscall number constants: 
+%define SYS_WRITE       1
 %define SYS_MMAP		9
 %define SYS_MUNMAP  	11
 %define SYS_MREMAP 		25
